@@ -207,6 +207,12 @@ class TranscriptChunkPayload(BaseModel):
     end: float = Field(ge=0.0, description="Segment end timestamp in seconds")
     text: str = Field(min_length=1, description="Transcribed segment text")
 
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "TranscriptChunkPayload":
+        if self.end < self.start:
+            raise ValueError(f"end timestamp ({self.end}) must be >= start timestamp ({self.start})")
+        return self
+
 
 class LLMTokenPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -214,6 +220,7 @@ class LLMTokenPayload(BaseModel):
 
 
 class ErrorCode(StrEnum):
+    INVALID_REQUEST = "INVALID_REQUEST"
     INVALID_AUDIO_FORMAT = "INVALID_AUDIO_FORMAT"
     FILE_TOO_LARGE = "FILE_TOO_LARGE"
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
@@ -301,7 +308,7 @@ Every requirement `S#` is deterministic, observable, and falsifiable by an autom
 
 - **`S1` (Audio Extension, MIME, Magic-Byte & Size Validation):**
   - **Given:** A client submits `POST /api/minutes/generate` with an uploaded file.
-  - **When:** The file extension is not in `{.mp3, .wav, .m4a, .ogg}`, OR the declared MIME type is outside `audio/*` / `application/octet-stream`, OR the leading file magic bytes do not match valid MP3 (`ID3` / `0xFFFB` / `0xFFF3` / `0xFFF2`), WAV (`RIFF....WAVE`), M4A (`ftyp`), or OGG (`OggS`) signatures, OR the payload size exceeds `25 MB` (`26,214,400` bytes).
+  - **When:** The file extension is not in `{.mp3, .wav, .m4a, .ogg}`, OR the declared MIME type is outside `audio/*` / `application/octet-stream`, OR the leading file magic bytes do not match valid MP3 (`ID3` or MPEG frame sync `0xFFFB` / `0xFFFA` / `0xFFF3` / `0xFFF2` / `0xFFE3` / `0xFFE2`), WAV (`RIFF....WAVE`), M4A (`ftyp`), or OGG (`OggS`) signatures, OR the payload size exceeds `25 MB` (`26,214,400` bytes).
   - **Then:** The endpoint rejects the upload before invoking ASR, returns HTTP `415` (invalid format/magic bytes) or HTTP `413` (exceeds `25 MB`) with structured JSON `{ "error": { "code": "INVALID_AUDIO_FORMAT" | "FILE_TOO_LARGE", "message": "..." } }`, and leaves zero files in the temporary directory.
 
 - **`S2` (Guaranteed Temporary File Sanitization & Cleanup):**
