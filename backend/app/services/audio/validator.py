@@ -18,6 +18,16 @@ MAX_UPLOAD_BYTES = 26_214_400
 CHUNK_SIZE = 1024 * 1024
 MAGIC_HEADER_BYTES = 12
 ALLOWED_EXTENSIONS = frozenset({".mp3", ".wav", ".m4a", ".ogg"})
+# ID3v2 tag, or an MPEG frame sync (MPEG-1/2 with/without CRC, MPEG-2.5) per S1.
+_MP3_SIGNATURES = (
+    b"ID3",
+    b"\xff\xfb",
+    b"\xff\xfa",
+    b"\xff\xf3",
+    b"\xff\xf2",
+    b"\xff\xe3",
+    b"\xff\xe2",
+)
 _GENERIC_CONTENT_TYPE = "application/octet-stream"
 
 
@@ -68,7 +78,7 @@ def validate_content_type(content_type: str | None) -> None:
 def matches_magic(ext: str, header: bytes) -> bool:
     """Check that the leading bytes match the signature family of ``ext``."""
     if ext == ".mp3":
-        return header.startswith((b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
+        return header.startswith(_MP3_SIGNATURES)
     if ext == ".wav":
         return header[:4] == b"RIFF" and header[8:12] == b"WAVE"
     if ext == ".m4a":
