@@ -72,6 +72,7 @@
 - **Deferred RDD findings (contract changes → Ask First, non-blocking):**
   1. `S1` MP3 magic set is spec-exact (`ID3`/`FFFB`/`FFF3`/`FFF2`); valid untagged MPEG-1 L3 with CRC (`FFFA`) and MPEG-2.5 (`FFE3`/`FFE2`) are rejected with `415`. Widen the spec set?
   2. `TranscriptChunkPayload` (spec §5.1 verbatim) allows `end < start`. Add an `end >= start` validator?
+- **Open hardening (3rd RDD review, approved, non-blocking):** guard `CleanupStream.__del__` against partially-initialised instances and exceptions; add tests for an abandoned `owned=False` stream (sample survives) and for a regular file at `upload_tmp_dir`. Fold into `T4` when the pipeline consumes `CleanupStream`.
 - **`T4` note:** the SSE generator handed to `StreamingResponse` must wrap ASR/LLM with `stream_with_cleanup`/`temp_audio_file` **and consume it inside `async with aclosing(...)`** so a disconnect (before or after the first frame) unlinks the upload deterministically; `CleanupStream.__del__` is only a last-resort release for abandoned streams (GC timing is not deterministic while tracebacks hold frames); `UnsafeUploadDirError` maps to pre-stream `500 INTERNAL_ERROR`.
 
 ## 5. Next Action
