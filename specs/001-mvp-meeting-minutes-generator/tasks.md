@@ -58,10 +58,10 @@ T1 (Core Schemas, Config, Audio Validator & Temp Cleanup)
   - `backend/app/services/asr/factory.py`
   - `backend/tests/test_asr_strategies.py`
 - **Acceptance Criteria:**
-  - [ ] RED test written and observed failing in `backend/tests/test_asr_strategies.py` for `S3` (`faster-whisper` singleton initialized with `device="cpu"`, `compute_type="int8"`, `vad_filter=True`, yielding `TranscriptChunkPayload` asynchronously without blocking the event loop, plus empty/silent audio detection) and `S4` (`ApiWhisperASR` via mocked `AsyncInferenceClient` / OpenAI audio endpoint).
-  - [ ] Minimal implementation passes GREEN without downloading live Whisper model weights during `pytest`.
+  - [x] RED test written and observed failing in `backend/tests/test_asr_strategies.py` for `S3` (`faster-whisper` singleton initialized with `device="cpu"`, `compute_type="int8"`, `vad_filter=True`, yielding `TranscriptChunkPayload` asynchronously without blocking the event loop, plus empty/silent audio detection) and `S4` (`ApiWhisperASR` via mocked `AsyncInferenceClient` / OpenAI audio endpoint).
+  - [x] Minimal implementation passes GREEN without downloading live Whisper model weights during `pytest`.
 - **Verification Command:** `cd backend && .venv/bin/pytest tests/test_asr_strategies.py -v && .venv/bin/ruff check app tests && .venv/bin/mypy app tests`
-- **Status:** `[ ] pending`
+- **Status:** `[x] done` (2026-11-03, Claude Code) — inline route; 20 new tests (85 total) green, ruff/format/mypy --strict clean; commit recorded in handoff
 
 ---
 

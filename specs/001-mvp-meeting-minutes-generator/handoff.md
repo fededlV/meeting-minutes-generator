@@ -11,8 +11,8 @@
 
 - **Spec Status:** `Approved` (`Approved By: fede (Human)`, `2026-11-01`)
 - **Last Updated By:** `Claude Code`
-- **Completed Tasks:** `T1`
-- **Pending Tasks:** `T2`, `T3`, `T4`, `T5`, `T6`, `T7`
+- **Completed Tasks:** `T1`, `T2`
+- **Pending Tasks:** `T3`, `T4`, `T5`, `T6`, `T7`
 
 ## 2. Spec-Challenge Notes (Filled by Claude Code in Plan Mode Before Coding)
 
@@ -45,6 +45,13 @@
 - **`S1`** HTTP status codes and **`S2`** pipeline-level cleanup are only observable once the endpoint exists → `T1` verifies at validator/cleanup unit level; `T4` re-verifies end-to-end.
 - **`< 1.5 GB` RAM** (Objective) has no `S#` or test → covered by compose `mem_limit` plus a manual smoke check in `T7`.
 
+### T2 Spec-Challenge Notes (`2026-11-03`, non-blocking)
+1. `TranscriptChunkPayload` still lacks the `end >= start` validator decided for `T4`; `T2` normalizers (`asr.base.to_chunk`) already clamp `end = max(end, start)`, so adding the validator in `T4` is safe.
+2. ADR-0001 says API fallback segment `[0.0, duration]`; task brief says `[0.0, 0.0]` → `[0.0, 0.0]` used (duration is unknown without decoding audio locally, which `S4` forbids).
+3. No `Settings` field for the remote ASR model id; adding an env var is "Ask First" → module constant `DEFAULT_API_ASR_MODEL = "openai/whisper-large-v3"`, overridable via constructor.
+4. API token precedence: BYOK `api_key` (router resolves `X-HF-Token`/`X-API-Key` in `T4`) → `HF_TOKEN` → `LLM_API_KEY` (last fallback added per task brief; `S4` lists only the first three).
+5. `S3` non-blocking is verified by asserting the decoder runs on a non-loop thread plus a decoder that blocks until the consumer has received chunk 1 (instead of the ticker idea above).
+
 ### Environment Note
 - Local dev venv uses Python 3.14 (human decision `2026-11-02`): `uv venv --python 3.14 --seed backend/.venv`, then the AGENTS.md pip install. Spec §3 / `S12` still pin the container to `python:3.12-slim`; local 3.14 vs. container 3.12 drift is accepted (code stays 3.12-compatible, e.g. ruff `target-version = "py312"`). Risk: `ctranslate2` / `faster-whisper` cp314 wheels — verified at install in `T1`; if missing, stop and ask.
 - Work happens directly on `main` (human decision `2026-11-02`, supersedes the earlier feature-branch note); Conventional Commits without AI attribution.
@@ -64,6 +71,8 @@
 | `2026-11-02` | `Claude Code` | **Upload dir & cleanup ownership:** `Settings.upload_tmp_dir` (default `gettempdir()/mmg-uploads`, created `0700`); `temp_audio_file(path, owned=)` / `stream_with_cleanup(...)` unlink only `owned=True` files, synchronously inside `finally` | Injectable dir makes "zero orphan files" testable; sync `unlink` cannot be interrupted by a second cancellation; `owned=False` protects the bundled sample (`S8`). File writes/`mkdir` go through `asyncio.to_thread` | Engram `spec/001-mvp-meeting-minutes-generator/decisions` |
 | `2026-11-02` | `Claude Code` | Secrets (`BYOKHeaders.x_api_key/x_hf_token`, `Settings.*_api_key/hf_token`) typed as `SecretStr` | Tokens never appear in `repr`/logs (AGENTS.md "Never log BYOK tokens") | — |
 | `2026-11-02` | `Human + Antigravity` | **T4 Decisions Resolved:** (1) Widened MP3 signatures to include `0xFFFA` and `0xFFE3`/`0xFFE2`; (2) Enforced `end >= start` in `TranscriptChunkPayload`; (3) Added `ErrorCode.INVALID_REQUEST` for 422 pre-stream validation; (4) Sample audio provided in `backend/assets/denver_council_sample.mp3` from MeetingBank (CC BY 4.0 / Public records); (5) Mitigated `S7` ASR DoS via global local-ASR semaphore (`asyncio.Semaphore(1)`) + local CPU ASR always subject to per-IP quota regardless of LLM BYOK key | Protects cloud server CPU from exhaustion while preserving multi-provider free LLM options (Hugging Face, OpenRouter, Google AI Studio); keeps demo and testing zero-cost | [spec.md](file:///home/fede/Proyectos/meeting-minutes-generator/specs/001-mvp-meeting-minutes-generator/spec.md) |
+| `2026-11-02` | `Human` | **S7 busy-CPU response:** when the local ASR semaphore is held, reject pre-stream with HTTP `503` (non-blocking acquire), not `429` | Server saturation is not a client quota violation; a distinct status lets the UI suggest switching to Remote API mode. Semaphore and `413`/`415` rejections do not consume per-IP quota. **Pending spec amendment:** `S7` text still says "`429` (or `503`)"; proposed additions `ErrorCode.SERVER_BUSY` + `Retry-After` header need confirmation | — |
+| `2026-11-03` | `Claude Code` | **T2 ASR engine:** `ASRStrategy.transcribe` declared as `def ... -> AsyncIterator` (async-generator compatible; spec's `async def` form would type as a coroutine); `faster_whisper` imported lazily inside `get_whisper_model` and strategies imported lazily in `factory`, so `api` mode never loads CTranslate2; model cached per size behind a `threading.Lock`; decoder runs in `asyncio.to_thread` feeding an `asyncio.Queue` via `call_soon_threadsafe`, with a `threading.Event` stop flag set in the consumer's `finally` (cancel/`aclose()` stops decoding after the current segment); missing API token raises `ASRError(MISSING_API_KEY)` at construction (pre-stream); upstream API errors re-raised with a fixed message (no credential echo) | Keeps loop responsive and RAM bounded; fail-fast token check lets `T4` reject before opening the SSE stream | Engram `spec/001-mvp-meeting-minutes-generator/decisions` |
 
 ## 4. Open Questions & Blockers
 
@@ -74,9 +83,10 @@
   - `ErrorCode.INVALID_REQUEST` added.
   - `S7` Local CPU ASR rate-limit DoS vector closed (global semaphore `Semaphore(1)` + IP quota strictly applies to local CPU compute).
   - `S8` Sample audio asset supplied and documented in `backend/assets/`.
+- **Pending spec amendment before T4:** `S7` must state `503` (decided `2026-11-02`); confirm `SERVER_BUSY` error code + `Retry-After`.
 - **Remaining for T5:** Contradiction #4 (Frontend testing strategy).
 - **Open hardening for T4:** Guard `CleanupStream.__del__` against partially-initialised instances; test abandoned `owned=False` stream; test regular file at `upload_tmp_dir`.
 
 ## 5. Next Action
 
-- **Claude Code:** Proceed with `T2` (ASR strategies, `S3`/`S4`) and `T3` (LLM synthesizer, `S5`). Gated decisions for `T4` are all resolved and cleared.
+- **Claude Code:** `T2` done. Proceed with `T3` (LLM synthesizer, `S5`); `T4` consumes `get_asr_strategy` and must map `ASRError.code` to `event: error`. Gated decisions for `T4` are all resolved and cleared.
