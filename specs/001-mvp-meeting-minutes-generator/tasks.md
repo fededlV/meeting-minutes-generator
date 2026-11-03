@@ -37,11 +37,11 @@ T1 (Core Schemas, Config, Audio Validator & Temp Cleanup)
   - `backend/app/services/audio/__init__.py`, `backend/app/services/audio/validator.py`, `backend/app/services/audio/cleanup.py`
   - `backend/tests/conftest.py`, `backend/tests/test_audio_validator.py`
 - **Acceptance Criteria:**
-  - [ ] RED test written and observed failing in `backend/tests/test_audio_validator.py` for `S1` (extension, MIME, magic-byte validation for `.mp3`/`.wav`/`.m4a`/`.ogg`, and `25 MB` size cap) and `S2` (guaranteed temp file unlink on normal exit, exception, and async generator cancellation).
-  - [ ] Minimal implementation passes GREEN with strict Pydantic v2 models (`StatusEventPayload`, `TranscriptChunkPayload`, `LLMTokenPayload`, `ErrorEventPayload`, `format_sse`).
-  - [ ] Zero orphan files remain in temporary storage after test runs.
+  - [x] RED test written and observed failing in `backend/tests/test_audio_validator.py` for `S1` (extension, MIME, magic-byte validation for `.mp3`/`.wav`/`.m4a`/`.ogg`, and `25 MB` size cap) and `S2` (guaranteed temp file unlink on normal exit, exception, and async generator cancellation).
+  - [x] Minimal implementation passes GREEN with strict Pydantic v2 models (`StatusEventPayload`, `TranscriptChunkPayload`, `LLMTokenPayload`, `ErrorEventPayload`, `format_sse`).
+  - [x] Zero orphan files remain in temporary storage after test runs.
 - **Verification Command:** `cd backend && .venv/bin/pytest tests/test_audio_validator.py -v && .venv/bin/ruff check app tests && .venv/bin/mypy app tests`
-- **Status:** `[ ] pending`
+- **Status:** `[x] done` (2026-11-02, Claude Code — 53 tests green; ruff, ruff format, mypy --strict clean)
 
 ---
 
