@@ -64,7 +64,7 @@
 | `2026-11-02` | `Claude Code` | **Upload dir & cleanup ownership:** `Settings.upload_tmp_dir` (default `gettempdir()/mmg-uploads`, created `0700`); `temp_audio_file(path, owned=)` / `stream_with_cleanup(...)` unlink only `owned=True` files, synchronously inside `finally` | Injectable dir makes "zero orphan files" testable; sync `unlink` cannot be interrupted by a second cancellation; `owned=False` protects the bundled sample (`S8`). File writes/`mkdir` go through `asyncio.to_thread` | Engram `spec/001-mvp-meeting-minutes-generator/decisions` |
 | `2026-11-02` | `Claude Code` | Secrets (`BYOKHeaders.x_api_key/x_hf_token`, `Settings.*_api_key/hf_token`) typed as `SecretStr` | Tokens never appear in `repr`/logs (AGENTS.md "Never log BYOK tokens") | — |
 
-| `2026-11-02` | `Claude Code` | RDD review `review-2fc0f8e5a799149e` (lenses risk + reliability) approved `3c0f410`; follow-up fix applies: class-based `CleanupStream` (async-generator `finally` never runs when `aclose()` precedes the first item), upload-dir hardening (refuse symlink / foreign owner, tighten mode to `0700` → `UnsafeUploadDirError` = HTTP 500), env-isolated settings tests, test tying `Settings.max_upload_bytes` to `MAX_UPLOAD_BYTES` | Closes an `S2` gap on early client disconnect and a shared-host tamper vector on the predictable default dir | — |
+| `2026-11-02` | `Claude Code` | RDD review `review-2fc0f8e5a799149e` (lenses risk + reliability) approved `3c0f410`; follow-up fix applies: class-based `CleanupStream` (async-generator `finally` never runs when `aclose()` precedes the first item), upload-dir hardening (refuse symlink / foreign owner, tighten mode to `0700` → `UnsafeUploadDirError` = HTTP 500), env-isolated settings tests, test tying `Settings.max_upload_bytes` to `MAX_UPLOAD_BYTES` Follow-up (2nd review `approved`): `CleanupStream.__del__` last-resort release + dangling-symlink upload dir → `UnsafeUploadDirError` | Closes an `S2` gap on early client disconnect and a shared-host tamper vector on the predictable default dir | — |
 
 ## 4. Open Questions & Blockers
 
@@ -72,7 +72,7 @@
 - **Deferred RDD findings (contract changes → Ask First, non-blocking):**
   1. `S1` MP3 magic set is spec-exact (`ID3`/`FFFB`/`FFF3`/`FFF2`); valid untagged MPEG-1 L3 with CRC (`FFFA`) and MPEG-2.5 (`FFE3`/`FFE2`) are rejected with `415`. Widen the spec set?
   2. `TranscriptChunkPayload` (spec §5.1 verbatim) allows `end < start`. Add an `end >= start` validator?
-- **`T4` note:** the SSE generator handed to `StreamingResponse` must wrap ASR/LLM with `stream_with_cleanup`/`temp_audio_file` so a disconnect before the first frame still unlinks the upload; `UnsafeUploadDirError` maps to pre-stream `500 INTERNAL_ERROR`.
+- **`T4` note:** the SSE generator handed to `StreamingResponse` must wrap ASR/LLM with `stream_with_cleanup`/`temp_audio_file` **and consume it inside `async with aclosing(...)`** so a disconnect (before or after the first frame) unlinks the upload deterministically; `CleanupStream.__del__` is only a last-resort release for abandoned streams (GC timing is not deterministic while tracebacks hold frames); `UnsafeUploadDirError` maps to pre-stream `500 INTERNAL_ERROR`.
 
 ## 5. Next Action
 

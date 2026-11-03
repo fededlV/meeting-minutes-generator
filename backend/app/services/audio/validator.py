@@ -129,7 +129,10 @@ def _ensure_magic(ext: str, header: bytes) -> None:
 
 def _prepare_upload_dir(dest_dir: Path) -> None:
     """Create ``dest_dir`` privately, refusing symlinks or directories owned by others."""
-    dest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        dest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except FileExistsError as exc:  # e.g. a dangling symlink or a regular file
+        raise UnsafeUploadDirError(f"Upload directory is not a real directory: {dest_dir}") from exc
     info = dest_dir.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise UnsafeUploadDirError(f"Upload directory is not a real directory: {dest_dir}")

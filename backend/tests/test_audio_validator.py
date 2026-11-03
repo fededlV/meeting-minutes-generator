@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import re
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from pathlib import Path
 
 import pytest
@@ -185,6 +187,16 @@ async def test_symlinked_upload_dir_is_refused(tmp_path: Path) -> None:
         )
 
     assert list(real.iterdir()) == []
+
+
+async def test_dangling_symlink_upload_dir_is_refused(tmp_path: Path) -> None:
+    link = tmp_path / "mmg-uploads"
+    link.symlink_to(tmp_path / "missing", target_is_directory=True)
+
+    with pytest.raises(UnsafeUploadDirError):
+        await save_validated_upload(
+            FakeUpload(OGG_HEADER + BODY), "a.ogg", "audio/ogg", dest_dir=link
+        )
 
 
 async def test_reader_failure_mid_stream_removes_partial_file(upload_dir: Path) -> None:
@@ -374,6 +386,38 @@ async def test_stream_wrapper_aclose_is_idempotent(audio_file: Path) -> None:
 
     with pytest.raises(StopAsyncIteration):
         await anext(stream)
+
+
+async def test_stream_wrapper_abandoned_mid_stream_is_released_on_gc(audio_file: Path) -> None:
+    stream = stream_with_cleanup(_segments(5), audio_file)
+    assert await anext(stream) == 0
+
+    del stream
+    gc.collect()
+
+    assert not audio_file.exists()
+
+
+async def test_consumer_cancelled_outside_anext_releases_file_via_aclosing(
+    audio_file: Path,
+) -> None:
+    # Contract for T4: consumers wrap the stream in ``aclosing`` so release is
+    # deterministic on cancellation (GC timing is not, while tracebacks hold frames).
+    got_first = asyncio.Event()
+
+    async def consumer() -> None:
+        async with aclosing(stream_with_cleanup(_segments(5), audio_file)) as stream:
+            async for _ in stream:
+                got_first.set()
+                await asyncio.sleep(3600)  # e.g. blocked sending an SSE frame
+
+    task = asyncio.create_task(consumer())
+    await got_first.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert not audio_file.exists()
 
 
 async def test_stream_wrapper_keeps_unowned_sample(audio_file: Path) -> None:

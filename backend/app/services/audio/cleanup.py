@@ -31,6 +31,8 @@ class CleanupStream[T]:
 
     Implemented as a class rather than an async generator because a generator's
     ``finally`` never runs if it is closed before its first ``__anext__``.
+    ``__del__`` is the last-resort release for streams abandoned without
+    ``aclose()`` (e.g. a consumer task cancelled while sending a frame).
     """
 
     def __init__(self, source: AsyncGenerator[T], path: Path, *, owned: bool) -> None:
@@ -52,6 +54,11 @@ class CleanupStream[T]:
             self._closed = True
             _release(self._path, owned=self._owned)
             raise
+
+    def __del__(self) -> None:
+        if not self._closed:
+            self._closed = True
+            _release(self._path, owned=self._owned)
 
     async def aclose(self) -> None:
         if self._closed:
