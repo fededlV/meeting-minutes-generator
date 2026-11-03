@@ -342,12 +342,14 @@ Every requirement `S#` is deterministic, observable, and falsifiable by an autom
     5. One or more `event: llm_token` frames (`{token}`)
     6. `event: status` (`stage: "completed"`)
 
-- **`S7` (BYOK Credential Precedence & Per-IP Rate Limiting):**
+- **`S7` (Resource-Scoped BYOK Precedence, Rate Limiting & CPU Concurrency Control):**
   - **Given:** A client calls `POST /api/minutes/generate`.
-  - **When:** The client omits `X-API-Key` and `X-HF-Token` and exceeds the configured per-IP sliding-window quota (default `5` requests/hour).
-  - **Then:** The server returns HTTP `429 Too Many Requests` with `{ "error": { "code": "RATE_LIMIT_EXCEEDED", "message": "..." } }`.
-  - **When:** The same IP supplies a non-empty `X-API-Key` or `X-HF-Token` header.
-  - **Then:** The request bypasses the IP rate limiter and uses the supplied header credential for upstream inference without logging the secret.
+  - **When:** The server is already actively running a local CPU Whisper transcription and another local ASR request arrives.
+  - **Then:** The server enforces a global concurrency semaphore (`max_concurrent_local_asr = 1`) and returns HTTP `429` (or `503`) with `{ "error": { "code": "RATE_LIMIT_EXCEEDED", "message": "Server CPU is currently processing another audio transcription. Please wait a moment or switch to Remote API mode." } }`, preventing cloud VM CPU exhaustion.
+  - **When:** The client uses `ASR_MODE=local` (consuming server CPU) and exceeds the per-IP sliding-window quota (default `5` requests/hour).
+  - **Then:** The request is rejected with HTTP `429 Too Many Requests` (`code: RATE_LIMIT_EXCEEDED`), even if an `X-API-Key` is passed, ensuring garbage LLM keys cannot buy unlimited server CPU transcription.
+  - **When:** The client uses `ASR_MODE=api` with an external token (`X-HF-Token`) AND an external LLM key (`X-API-Key`).
+  - **Then:** The request offloads both stages to remote infrastructure, burns zero server AI compute, and safely bypasses the server rate limiter without logging user credentials.
 
 - **`S8` (Instant Demo Mode & Sample Audio Endpoint):**
   - **Given:** A visitor clicks "Load Denver City Council Sample" in the UI.

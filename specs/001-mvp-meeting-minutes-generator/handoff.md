@@ -63,18 +63,20 @@
 | `2026-11-02` | `Claude Code` | **T1 validation order:** extension + Content-Type (no disk I/O) → chunked stream with size cap (`413` at `26,214,401` bytes) → magic bytes checked as soon as 12 bytes are buffered (`415`). Refines the earlier "size → format" note | Never writes untrusted bytes to disk when the name/MIME already disqualify the upload; fails fast on wrong magic without reading 25 MB. Consequence: a 30 MB `.exe` returns `415`, not `413` | Engram `spec/001-mvp-meeting-minutes-generator/decisions` |
 | `2026-11-02` | `Claude Code` | **Upload dir & cleanup ownership:** `Settings.upload_tmp_dir` (default `gettempdir()/mmg-uploads`, created `0700`); `temp_audio_file(path, owned=)` / `stream_with_cleanup(...)` unlink only `owned=True` files, synchronously inside `finally` | Injectable dir makes "zero orphan files" testable; sync `unlink` cannot be interrupted by a second cancellation; `owned=False` protects the bundled sample (`S8`). File writes/`mkdir` go through `asyncio.to_thread` | Engram `spec/001-mvp-meeting-minutes-generator/decisions` |
 | `2026-11-02` | `Claude Code` | Secrets (`BYOKHeaders.x_api_key/x_hf_token`, `Settings.*_api_key/hf_token`) typed as `SecretStr` | Tokens never appear in `repr`/logs (AGENTS.md "Never log BYOK tokens") | — |
-
-| `2026-11-02` | `Claude Code` | RDD review `review-2fc0f8e5a799149e` (lenses risk + reliability) approved `3c0f410`; follow-up fix applies: class-based `CleanupStream` (async-generator `finally` never runs when `aclose()` precedes the first item), upload-dir hardening (refuse symlink / foreign owner, tighten mode to `0700` → `UnsafeUploadDirError` = HTTP 500), env-isolated settings tests, test tying `Settings.max_upload_bytes` to `MAX_UPLOAD_BYTES` Follow-up (2nd review `approved`): `CleanupStream.__del__` last-resort release + dangling-symlink upload dir → `UnsafeUploadDirError` | Closes an `S2` gap on early client disconnect and a shared-host tamper vector on the predictable default dir | — |
+| `2026-11-02` | `Human + Antigravity` | **T4 Decisions Resolved:** (1) Widened MP3 signatures to include `0xFFFA` and `0xFFE3`/`0xFFE2`; (2) Enforced `end >= start` in `TranscriptChunkPayload`; (3) Added `ErrorCode.INVALID_REQUEST` for 422 pre-stream validation; (4) Sample audio provided in `backend/assets/denver_council_sample.mp3` from MeetingBank (CC BY 4.0 / Public records); (5) Mitigated `S7` ASR DoS via global local-ASR semaphore (`asyncio.Semaphore(1)`) + local CPU ASR always subject to per-IP quota regardless of LLM BYOK key | Protects cloud server CPU from exhaustion while preserving multi-provider free LLM options (Hugging Face, OpenRouter, Google AI Studio); keeps demo and testing zero-cost | [spec.md](file:///home/fede/Proyectos/meeting-minutes-generator/specs/001-mvp-meeting-minutes-generator/spec.md) |
 
 ## 4. Open Questions & Blockers
 
 - Specification and vertical slices (`T1`–`T7`) approved by human on `2026-11-01`.
-- **Deferred RDD findings (contract changes → Ask First, non-blocking):**
-  1. `S1` MP3 magic set is spec-exact (`ID3`/`FFFB`/`FFF3`/`FFF2`); valid untagged MPEG-1 L3 with CRC (`FFFA`) and MPEG-2.5 (`FFE3`/`FFE2`) are rejected with `415`. Widen the spec set?
-  2. `TranscriptChunkPayload` (spec §5.1 verbatim) allows `end < start`. Add an `end >= start` validator?
-- **Open hardening (3rd RDD review, approved, non-blocking):** guard `CleanupStream.__del__` against partially-initialised instances and exceptions; add tests for an abandoned `owned=False` stream (sample survives) and for a regular file at `upload_tmp_dir`. Fold into `T4` when the pipeline consumes `CleanupStream`.
-- **`T4` note:** the SSE generator handed to `StreamingResponse` must wrap ASR/LLM with `stream_with_cleanup`/`temp_audio_file` **and consume it inside `async with aclosing(...)`** so a disconnect (before or after the first frame) unlinks the upload deterministically; `CleanupStream.__del__` is only a last-resort release for abandoned streams (GC timing is not deterministic while tracebacks hold frames); `UnsafeUploadDirError` maps to pre-stream `500 INTERNAL_ERROR`.
+- **Decisions Cleared for T4:**
+  - `S1` MP3 magic signatures widened.
+  - `TranscriptChunkPayload` `end >= start` validated.
+  - `ErrorCode.INVALID_REQUEST` added.
+  - `S7` Local CPU ASR rate-limit DoS vector closed (global semaphore `Semaphore(1)` + IP quota strictly applies to local CPU compute).
+  - `S8` Sample audio asset supplied and documented in `backend/assets/`.
+- **Remaining for T5:** Contradiction #4 (Frontend testing strategy).
+- **Open hardening for T4:** Guard `CleanupStream.__del__` against partially-initialised instances; test abandoned `owned=False` stream; test regular file at `upload_tmp_dir`.
 
 ## 5. Next Action
 
-- **Claude Code:** `T1` done. Next: `T2` (ASR strategies, `S3`/`S4`) and `T3` (LLM synthesizer, `S5`). Both reuse `app.config.Settings` and pinned deps without editing them. Gated decisions remain before `T4` (Contradiction #5, `S7` ASR DoS, sample asset) and `T5` (Contradiction #4).
+- **Claude Code:** Proceed with `T2` (ASR strategies, `S3`/`S4`) and `T3` (LLM synthesizer, `S5`). Gated decisions for `T4` are all resolved and cleared.
