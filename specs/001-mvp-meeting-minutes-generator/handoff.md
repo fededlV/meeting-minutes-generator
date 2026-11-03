@@ -87,6 +87,12 @@
 - **Remaining for T5:** Contradiction #4 (Frontend testing strategy).
 - **Open hardening for T4:** Guard `CleanupStream.__del__` against partially-initialised instances; test abandoned `owned=False` stream; test regular file at `upload_tmp_dir`.
 
+- **Open hardening from T2 RDD review (`review-26a7c9c0776f2697`, approved, advisories only):**
+  - `api_whisper`: response parsing (empty/`None` timestamps, `None` text) and `read_bytes` `OSError` escape as raw exceptions → wrap into `ASRError` like the local strategy.
+  - `api_whisper`: `raise ASRError(...) from exc` keeps a possibly token-bearing `__cause__`; `T4` must not log the cause chain (or use `from None`).
+  - `factory`: whitespace-only BYOK key stops the fallback chain → treat blank as missing.
+  - `factory`: `LLM_API_KEY` fallback may send an OpenRouter/Gemini key to Hugging Face → **human decision needed** (keep, restrict to `huggingface` provider, or drop).
+
 ## 5. Next Action
 
 - **Claude Code:** `T2` done. Proceed with `T3` (LLM synthesizer, `S5`); `T4` consumes `get_asr_strategy` and must map `ASRError.code` to `event: error`. Gated decisions for `T4` are all resolved and cleared.
