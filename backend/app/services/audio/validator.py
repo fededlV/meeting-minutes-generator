@@ -6,6 +6,8 @@ exception propagates, so rejected requests leave zero files on disk.
 """
 
 import asyncio
+import os
+import stat
 import uuid
 from pathlib import Path, PurePath
 from typing import Protocol
@@ -42,6 +44,10 @@ class InvalidAudioFormatError(AudioValidationError):
 class FileTooLargeError(AudioValidationError):
     code = ErrorCode.FILE_TOO_LARGE
     status_code = 413
+
+
+class UnsafeUploadDirError(RuntimeError):
+    """Server-side misconfiguration: the upload directory cannot be trusted (HTTP 500)."""
 
 
 def validate_extension(filename: str) -> str:
@@ -88,7 +94,7 @@ async def save_validated_upload(
     ext = validate_extension(filename)
     validate_content_type(content_type)
 
-    await asyncio.to_thread(dest_dir.mkdir, mode=0o700, parents=True, exist_ok=True)
+    await asyncio.to_thread(_prepare_upload_dir, dest_dir)
     path = dest_dir / f"{uuid.uuid4().hex}{ext}"
 
     header = b""
@@ -119,3 +125,15 @@ async def save_validated_upload(
 def _ensure_magic(ext: str, header: bytes) -> None:
     if not matches_magic(ext, header):
         raise InvalidAudioFormatError("File content does not match a supported audio format.")
+
+
+def _prepare_upload_dir(dest_dir: Path) -> None:
+    """Create ``dest_dir`` privately, refusing symlinks or directories owned by others."""
+    dest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = dest_dir.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise UnsafeUploadDirError(f"Upload directory is not a real directory: {dest_dir}")
+    if info.st_uid != os.getuid():
+        raise UnsafeUploadDirError(f"Upload directory is owned by another user: {dest_dir}")
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        dest_dir.chmod(0o700)

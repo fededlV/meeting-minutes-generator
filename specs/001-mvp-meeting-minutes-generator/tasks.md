@@ -41,7 +41,7 @@ T1 (Core Schemas, Config, Audio Validator & Temp Cleanup)
   - [x] Minimal implementation passes GREEN with strict Pydantic v2 models (`StatusEventPayload`, `TranscriptChunkPayload`, `LLMTokenPayload`, `ErrorEventPayload`, `format_sse`).
   - [x] Zero orphan files remain in temporary storage after test runs.
 - **Verification Command:** `cd backend && .venv/bin/pytest tests/test_audio_validator.py -v && .venv/bin/ruff check app tests && .venv/bin/mypy app tests`
-- **Status:** `[x] done` (2026-11-02, Claude Code — 53 tests green; ruff, ruff format, mypy --strict clean)
+- **Status:** `[x] done` (2026-11-02, Claude Code) — commits `3c0f410` (feat, RDD review `review-2fc0f8e5a799149e` approved) + follow-up `fix(backend)` for review findings; 59 tests green, ruff/format/mypy --strict clean
 
 ---
 

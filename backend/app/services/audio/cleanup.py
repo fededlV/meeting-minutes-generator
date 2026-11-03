@@ -1,13 +1,21 @@
 """Guaranteed temporary audio cleanup (S2).
 
-Files the request created (``owned=True``) are unlinked in a ``finally`` block on
-normal completion, exception, ``asyncio.CancelledError`` or generator ``aclose()``.
-Unowned files (e.g. the read-only bundled sample asset) are never touched.
+Files the request created (``owned=True``) are unlinked on normal completion,
+exception, ``asyncio.CancelledError`` or ``aclose()`` -- including ``aclose()``
+before the first item is pulled. Unowned files (e.g. the read-only bundled sample
+asset) are never touched.
 """
 
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import aclosing, asynccontextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Self
+
+
+def _release(path: Path, *, owned: bool) -> None:
+    if owned:
+        # Synchronous on purpose: must complete even while being cancelled.
+        path.unlink(missing_ok=True)
 
 
 @asynccontextmanager
@@ -15,15 +23,48 @@ async def temp_audio_file(path: Path, *, owned: bool = True) -> AsyncIterator[Pa
     try:
         yield path
     finally:
-        if owned:
-            # Synchronous on purpose: must complete even while being cancelled.
-            path.unlink(missing_ok=True)  # noqa: ASYNC240
+        _release(path, owned=owned)
 
 
-async def stream_with_cleanup[T](
+class CleanupStream[T]:
+    """Async iterator that re-yields ``source`` and releases ``path`` when it ends.
+
+    Implemented as a class rather than an async generator because a generator's
+    ``finally`` never runs if it is closed before its first ``__anext__``.
+    """
+
+    def __init__(self, source: AsyncGenerator[T], path: Path, *, owned: bool) -> None:
+        self._source = source
+        self._path = path
+        self._owned = owned
+        self._closed = False
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> T:
+        if self._closed:
+            raise StopAsyncIteration
+        try:
+            return await anext(self._source)
+        except BaseException:
+            # StopAsyncIteration, upstream errors and cancellation all end the stream.
+            self._closed = True
+            _release(self._path, owned=self._owned)
+            raise
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await self._source.aclose()
+        finally:
+            _release(self._path, owned=self._owned)
+
+
+def stream_with_cleanup[T](
     source: AsyncGenerator[T], path: Path, *, owned: bool = True
-) -> AsyncGenerator[T]:
-    """Re-yield ``source`` items and release ``path`` when the stream ends for any reason."""
-    async with temp_audio_file(path, owned=owned), aclosing(source) as items:
-        async for item in items:
-            yield item
+) -> CleanupStream[T]:
+    """Wrap ``source`` so ``path`` is released when the stream ends for any reason."""
+    return CleanupStream(source, path, owned=owned)

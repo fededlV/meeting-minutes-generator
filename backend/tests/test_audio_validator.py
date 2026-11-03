@@ -29,6 +29,7 @@ from app.services.audio.validator import (
     AudioValidationError,
     FileTooLargeError,
     InvalidAudioFormatError,
+    UnsafeUploadDirError,
     save_validated_upload,
 )
 from tests.conftest import (
@@ -158,6 +159,32 @@ async def test_missing_upload_dir_is_created_private(tmp_path: Path) -> None:
 
     assert path.parent == target
     assert target.stat().st_mode & 0o777 == 0o700
+
+
+async def test_existing_loose_upload_dir_is_tightened_to_private(tmp_path: Path) -> None:
+    target = tmp_path / "mmg-uploads"
+    target.mkdir(mode=0o755)
+    target.chmod(0o755)
+
+    await save_validated_upload(
+        FakeUpload(OGG_HEADER + BODY), "a.ogg", "audio/ogg", dest_dir=target
+    )
+
+    assert target.stat().st_mode & 0o777 == 0o700
+
+
+async def test_symlinked_upload_dir_is_refused(tmp_path: Path) -> None:
+    real = tmp_path / "attacker-controlled"
+    real.mkdir()
+    link = tmp_path / "mmg-uploads"
+    link.symlink_to(real, target_is_directory=True)
+
+    with pytest.raises(UnsafeUploadDirError):
+        await save_validated_upload(
+            FakeUpload(OGG_HEADER + BODY), "a.ogg", "audio/ogg", dest_dir=link
+        )
+
+    assert list(real.iterdir()) == []
 
 
 async def test_reader_failure_mid_stream_removes_partial_file(upload_dir: Path) -> None:
@@ -312,6 +339,43 @@ async def test_stream_wrapper_removes_file_when_source_raises(audio_file: Path) 
     assert not audio_file.exists()
 
 
+async def test_stream_wrapper_removes_file_on_aclose_before_first_item(audio_file: Path) -> None:
+    # Client disconnects before the response ever starts iterating.
+    stream = stream_with_cleanup(_segments(3), audio_file)
+    await stream.aclose()
+
+    assert not audio_file.exists()
+
+
+async def test_stream_wrapper_closes_started_source_on_aclose(audio_file: Path) -> None:
+    source_closed = False
+
+    async def source() -> AsyncGenerator[int]:
+        nonlocal source_closed
+        try:
+            yield 1
+            yield 2
+        finally:
+            source_closed = True
+
+    stream = stream_with_cleanup(source(), audio_file)
+    assert await anext(stream) == 1
+    await stream.aclose()
+
+    assert source_closed
+    assert not audio_file.exists()
+
+
+async def test_stream_wrapper_aclose_is_idempotent(audio_file: Path) -> None:
+    stream = stream_with_cleanup(_segments(2), audio_file)
+
+    await stream.aclose()
+    await stream.aclose()
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+
 async def test_stream_wrapper_keeps_unowned_sample(audio_file: Path) -> None:
     items = [item async for item in stream_with_cleanup(_segments(2), audio_file, owned=False)]
 
@@ -396,8 +460,8 @@ def test_byok_headers_reject_unknown_provider() -> None:
 
 
 def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("ASR_MODE", "WHISPER_MODEL_SIZE", "DEFAULT_LLM_PROVIDER", "HF_TOKEN"):
-        monkeypatch.delenv(var, raising=False)
+    for field in Settings.model_fields:
+        monkeypatch.delenv(field.upper(), raising=False)
 
     settings = Settings(_env_file=None)
 
@@ -425,3 +489,9 @@ def test_settings_reject_unsupported_whisper_model(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_settings_upload_cap_matches_validator_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MAX_UPLOAD_BYTES", raising=False)
+
+    assert Settings(_env_file=None).max_upload_bytes == MAX_UPLOAD_BYTES
